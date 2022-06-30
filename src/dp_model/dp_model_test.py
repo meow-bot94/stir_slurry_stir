@@ -16,7 +16,7 @@ def randomized_incoming_wip_config():
             rand_seed=i,
             min_wip_cluster=1,
             max_wip_cluster=4,
-            max_wip_magnitude=200,
+            max_wip_magnitude=300,
             wafer_slurry_consumption_kg=3,
         )
         config_list.append(incoming_wip_config)
@@ -33,3 +33,20 @@ def test_dp_model(config):
     print(state_df)
     assert best_end_state[1].cost == 0
 
+
+def test_dp_model_debug():
+    incoming_wip_config = IncomingWipConfig(
+        scenario=default_scenario_config,
+        rand_seed=2,
+        min_wip_cluster=1,
+        max_wip_cluster=4,
+        max_wip_magnitude=300,
+        wafer_slurry_consumption_kg=3,
+    )
+    incoming_wip = IncomingWipGenerator(incoming_wip_config).generate()
+    dp_model = DpModel(default_dp_model_config)
+    dp_model.run(incoming_wip)
+    state_df = dp_model.get_best_state_df()
+    best_end_state = dp_model.get_best_end_state()
+    print(state_df)
+    assert best_end_state[1].cost == 0

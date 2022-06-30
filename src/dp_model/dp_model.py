@@ -135,19 +135,22 @@ class DpModel:
         return new_tank_states, current_state.active_tank, new_cost
 
     def _switch_out_active_tank(self, current_state: State, cost: float, slurry_consumption: int) -> Tuple[List[TankState], int, float]:
+        new_tank_states = list()
+        next_tank_idx = self._get_next_tank(current_state.active_tank)
+        next_tank_state = current_state.tank_states[next_tank_idx]
+        if not self._check_tank_useable(next_tank_state):
+            return self._do_nothing(current_state, cost, slurry_consumption)
+
         active_tank_state = current_state.tank_states[current_state.active_tank]
         active_tank_current_config = self.tank_config[current_state.active_tank]
         active_tank_current_slurry_unit = active_tank_state.current_slurry_unit
         active_tank_min_slurry = active_tank_current_config.tank_min_capacity_slurry_unit
 
-        wasted_slurry_units = active_tank_current_slurry_unit - active_tank_min_slurry
+        wasted_slurry_units = max(active_tank_current_slurry_unit - active_tank_min_slurry, 0)
         new_cost = cost + wasted_slurry_units * self.config.slurry_unit_wastage_penalty
 
-        current_tank_states = current_state.tank_states
-        new_tank_states = list()
-        next_tank_idx = self._get_next_tank(current_state.active_tank)
-        next_tank_state = current_state.tank_states[next_tank_idx]
-        next_tank_new_state = self._add_slurry(next_tank_state, active_tank_min_slurry-slurry_consumption)
+        bringover_slurry_units = min(active_tank_min_slurry, active_tank_current_slurry_unit)
+        next_tank_new_state = self._add_slurry(next_tank_state, bringover_slurry_units-slurry_consumption)
         active_tank_new_state = self._put_tank_to_clean(active_tank_state, current_state.period)
         new_tank_states.append(next_tank_new_state)
         new_tank_states.append(active_tank_new_state)
