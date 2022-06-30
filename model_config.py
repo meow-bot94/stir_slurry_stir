@@ -34,7 +34,7 @@ class ModelConfig:
         self.tank_status = sorted(self.tank_status)
 
 
-default_config = ModelConfig(
+default_model_config = ModelConfig(
     num_tanks=3,
     tank_status=[default_tank_state]*3,
     tank_fill_capacity_kg=200,
