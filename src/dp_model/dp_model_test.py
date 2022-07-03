@@ -1,5 +1,6 @@
 import pytest
 
+import numpy as np
 from src.incoming_wip.incoming_wip_generator import IncomingWipGenerator
 from src.incoming_wip.incoming_wip_config import default_incoming_wip_config, IncomingWipConfig
 
@@ -31,7 +32,7 @@ def test_dp_model(config):
     state_df = dp_model.get_best_state_df()
     best_end_state = dp_model.get_best_end_state()
     print(state_df)
-    assert best_end_state[1].cost == 0
+    assert best_end_state[1].cost != np.inf
 
 
 def test_dp_model_debug():
@@ -49,4 +50,4 @@ def test_dp_model_debug():
     state_df = dp_model.get_best_state_df()
     best_end_state = dp_model.get_best_end_state()
     print(state_df)
-    assert best_end_state[1].cost == 0
+    assert best_end_state[1].cost != np.inf

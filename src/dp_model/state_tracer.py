@@ -2,6 +2,7 @@ from typing import Tuple, Dict, List, TYPE_CHECKING
 
 import pandas as pd
 
+from src.dp_model.exceptions import ModelNotRunError
 from src.dp_model.model_states import State, StateValue
 
 
@@ -14,7 +15,13 @@ class StateTracer:
         self.model = dp_model
         self.states = dp_model.states
 
+    def _check_model_has_run(self) -> bool:
+        if not self.model.has_run:
+            raise ModelNotRunError(f'Mode not run: run model before querying end states')
+        return True
+
     def get_best_end_state(self) -> Tuple[State, StateValue]:
+        self._check_model_has_run()
         end_states: Dict[State, StateValue] = self.states[self.model.lookahead_period]
         # Bug in Pycharm's type hinting: https://youtrack.jetbrains.com/issue/PY-38897
         # noinspection PyTypeChecker
