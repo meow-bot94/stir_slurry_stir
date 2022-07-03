@@ -1,0 +1,4 @@
+
+
+class ModelNotRunError(Exception):
+    pass
