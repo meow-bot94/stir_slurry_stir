@@ -90,6 +90,10 @@ class DpModel:
         tank_config = self.tank_config[tank_id]
         return TankState(tank_id, 0, tank_config.tank_clean_period, tank_config.tank_fill_period, period)
 
+    def put_tank_in_a_mall(self, tank_state: TankState, period: int):
+        # bobo
+        pass
+
     def add_slurry(self, tank_state: TankState, slurry_unit: int) -> TankState:
         return TankState(
             tank_state.id,
