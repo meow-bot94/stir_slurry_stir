@@ -46,7 +46,7 @@ class DpModel:
     def get_next_tank(self, tank_idx: int) -> int:
         return (tank_idx + 1) % self.tank_count
 
-    def _get_other_tanks_states(self, current_state: State, exclude_tank_list: List[TankState]) -> List[TankState]:
+    def get_other_tanks_states(self, current_state: State, exclude_tank_list: List[TankState]) -> List[TankState]:
         exclude_idx = set([tank.id for tank in exclude_tank_list])
         other_tank_idx = [idx for idx in self.tank_config if idx not in exclude_idx]
         other_tank_states = [current_state.tank_states[idx] for idx in other_tank_idx]
@@ -76,7 +76,7 @@ class DpModel:
         other_tanks.append(fill_tank)
         return other_tanks
 
-    def _process_non_active_tanks(self, tank_states: List[TankState]) -> List[TankState]:
+    def process_non_active_tanks(self, tank_states: List[TankState]) -> List[TankState]:
         idle_full_tanks = list(filter(lambda state: state.down_start_period == np.inf, tank_states))
         cleaning_tanks = list(filter(lambda state: state.cleaning_period_remaining > 0, tank_states))
         filling_tanks = list(filter(lambda state: (state.cleaning_period_remaining == 0) and (state.filling_period_remaining > 0), tank_states))
@@ -85,12 +85,12 @@ class DpModel:
         new_filling_tanks = self._fill_tank_if_possible(filling_tanks)
         return new_filling_tanks + new_cleaning_tanks + idle_full_tanks
 
-    def _put_tank_to_clean(self, tank_state: TankState, period: int) -> TankState:
+    def put_tank_to_clean(self, tank_state: TankState, period: int) -> TankState:
         tank_id = tank_state.id
         tank_config = self.tank_config[tank_id]
         return TankState(tank_id, 0, tank_config.tank_clean_period, tank_config.tank_fill_period, period)
 
-    def _add_slurry(self, tank_state: TankState, slurry_unit: int) -> TankState:
+    def add_slurry(self, tank_state: TankState, slurry_unit: int) -> TankState:
         return TankState(
             tank_state.id,
             tank_state.current_slurry_unit + slurry_unit,
@@ -99,7 +99,7 @@ class DpModel:
             tank_state.down_start_period,
         )
 
-    def _consume_slurry(self, tank_state: TankState, slurry_unit: int) -> TankState:
+    def consume_slurry(self, tank_state: TankState, slurry_unit: int) -> TankState:
         return TankState(
             tank_state.id,
             tank_state.current_slurry_unit - slurry_unit,
@@ -135,7 +135,7 @@ class DpModel:
                 cost: float = current_state_value.cost
                 slurry_consumption: int = discretized_wip[period]
                 for action_doer in self.available_action_doers:
-                    if action_doer.is_feasible(current_state):
+                    if action_doer.is_feasible(current_state, slurry_consumption):
                         new_state, new_cost = action_doer.do(current_state, cost, slurry_consumption)
                         self._add_state(current_state, new_state, new_cost)
         self.has_run = True
@@ -162,7 +162,7 @@ class ModelAction(ABC):
         self.model = dp_model
 
     @abstractmethod
-    def is_feasible(self, current_state: State) -> bool:
+    def is_feasible(self, current_state: State, slurry_consumption: float) -> bool:
         pass
 
     @staticmethod
@@ -181,43 +181,41 @@ class ModelAction(ABC):
 
 
 class DoNothing(ModelAction):
-    def is_feasible(self, current_state: State) -> bool:
+    def is_feasible(self, current_state: State, slurry_consumption: float) -> bool:
+        model = self.model
+        active_tank_state = current_state.tank_states[current_state.active_tank]
+        active_tank_current_config = model.tank_config[current_state.active_tank]
+
+        new_slurry_unit = active_tank_state.current_slurry_unit - slurry_consumption
+        next_tank = model.get_next_tank(current_state.active_tank)
+        next_tank_state = current_state.tank_states[next_tank]
+
+        reach_min_slurry_level = new_slurry_unit <= active_tank_current_config.tank_min_capacity_slurry_unit
+        if reach_min_slurry_level and model.check_tank_useable(next_tank_state):
+            # always attempt to switch if hit min capacity; cannot do nothing unless infeasible
+            return False
+        # No tank to switch, or no need to switch
         return True
 
     def _do(self, current_state: State, cost: float, slurry_consumption: int) -> Tuple[List[TankState], int, float]:
         model = self.model
         active_tank_state = current_state.tank_states[current_state.active_tank]
-        active_tank_current_config = model.tank_config[current_state.active_tank]
-        active_tank_current_slurry_unit = active_tank_state.current_slurry_unit
-
         new_tank_states = list()
-        new_slurry_unit = active_tank_current_slurry_unit - slurry_consumption
-        if new_slurry_unit <= active_tank_current_config.tank_min_capacity_slurry_unit:  # hit min capacity
-            next_tank_idx = model.get_next_tank(current_state.active_tank)
-            next_tank_state = current_state.tank_states[next_tank_idx]
-            if model.check_tank_useable(next_tank_state):  # attempt to switch
-                next_tank_new_state = model._add_slurry(next_tank_state, new_slurry_unit)
-                active_tank_new_state = model._put_tank_to_clean(active_tank_state, current_state.period)
-                new_tank_states.append(next_tank_new_state)
-                new_tank_states.append(active_tank_new_state)
-                other_tank_states = model._get_other_tanks_states(current_state, new_tank_states)
-                processed_other_tank_states = model._process_non_active_tanks(other_tank_states)
-                new_tank_states.extend(processed_other_tank_states)
-                return new_tank_states, next_tank_idx, cost
-        # No where to switch, or no need to switch
-        unserved_slurry = max(slurry_consumption - active_tank_current_slurry_unit, 0)
+
+        unserved_slurry = max(slurry_consumption - active_tank_state.current_slurry_unit, 0)
         served_slurry = slurry_consumption - unserved_slurry
         new_cost = cost + unserved_slurry * model.config.slurry_unit_violate_penalty
-        active_tank_new_state = model._consume_slurry(active_tank_state, served_slurry)
+        active_tank_new_state = model.consume_slurry(active_tank_state, served_slurry)
         new_tank_states.append(active_tank_new_state)
-        other_tank_states = model._get_other_tanks_states(current_state, new_tank_states)
-        processed_other_tank_states = model._process_non_active_tanks(other_tank_states)
+
+        other_tank_states = model.get_other_tanks_states(current_state, new_tank_states)
+        processed_other_tank_states = model.process_non_active_tanks(other_tank_states)
         new_tank_states.extend(processed_other_tank_states)
         return new_tank_states, current_state.active_tank, new_cost
 
 
 class SwitchOutActiveTank(ModelAction):
-    def is_feasible(self, current_state: State) -> bool:
+    def is_feasible(self, current_state: State, slurry_consumption: float) -> bool:
         next_tank_idx = self.model.get_next_tank(current_state.active_tank)
         next_tank_state = current_state.tank_states[next_tank_idx]
         return self.model.check_tank_useable(next_tank_state)
@@ -237,12 +235,12 @@ class SwitchOutActiveTank(ModelAction):
         new_cost = cost + wasted_slurry_units * model.config.slurry_unit_wastage_penalty
 
         bringover_slurry_units = min(active_tank_min_slurry, active_tank_current_slurry_unit)
-        next_tank_new_state = model._add_slurry(next_tank_state, bringover_slurry_units-slurry_consumption)
-        active_tank_new_state = model._put_tank_to_clean(active_tank_state, current_state.period)
+        next_tank_new_state = model.add_slurry(next_tank_state, bringover_slurry_units - slurry_consumption)
+        active_tank_new_state = model.put_tank_to_clean(active_tank_state, current_state.period)
         new_tank_states.append(next_tank_new_state)
         new_tank_states.append(active_tank_new_state)
-        other_tank_states = model._get_other_tanks_states(current_state, new_tank_states)
-        processed_other_tank_states = model._process_non_active_tanks(other_tank_states)
+        other_tank_states = model.get_other_tanks_states(current_state, new_tank_states)
+        processed_other_tank_states = model.process_non_active_tanks(other_tank_states)
         new_tank_states.extend(processed_other_tank_states)
         return new_tank_states, next_tank_idx, new_cost
 
